@@ -1,0 +1,10 @@
+Unidecode 
+cloudscraper 
+html5lib 
+pandas 
+requests 
+rich 
+unicode 
+lxml 
+socceraction 
+packaging 

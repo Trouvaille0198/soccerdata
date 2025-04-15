@@ -303,6 +303,7 @@ class BaseReader(ABC):
         is_cached = self._is_cached(filepath, max_age)
         if no_cache or self.no_cache or not is_cached:
             logger.debug("Scraping %s", url)
+            raise ValueError("nonono!")
             return self._download_and_save(url, filepath, var)
         logger.debug("Retrieving %s from cache", url)
         if filepath is None:
