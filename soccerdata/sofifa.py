@@ -475,6 +475,9 @@ class SoFIFA(BaseRequestsReader):
             }
 
             # region basic info
+            simple_name=tree.xpath("/html/body/header/section/h1/text()")[0]
+            scores["simple_name"]=simple_name
+
             basic_info_p=tree.xpath("//div[contains(@class, 'profile')]/p/text()")
             basic_info=next((b for b in basic_info_p if b.strip()), None)
             if not basic_info:
