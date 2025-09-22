@@ -494,10 +494,22 @@ class SoFIFA(BaseRequestsReader):
             scores["height"] = int(basic_info_match.group(3))
             scores["weight"] = int(basic_info_match.group(4))
 
-            scores["pos"]=tree.xpath("//div[contains(@class, 'profile')]/p/span/text()")[0]
+            poses=tree.xpath("//div[contains(@class, 'profile')]/p/span/text()")
+            scores["pos"]=poses[0]
+            scores["poses"]=poses[:]
             scores["avatar"] = tree.xpath("//div[contains(@class, 'profile')]/img/@data-src")[0]
             name_line=tree.xpath("//*[@id='head']/title/text()")[0]
             scores["name"]=name_line.split("-")[0].strip()
+            contract_end_year_text=tree.xpath('//p[contains(., "Contract valid until")]/text()[normalize-space()]')
+            if contract_end_year_text:
+                # 提取数字部分
+                year_match = re.search(r'\d{4}', contract_end_year_text[0])
+                if year_match:
+                    scores["contract_end_year"] = int(year_match.group())
+                else:
+                    scores["contract_end_year"] = None
+            else:
+                scores["contract_end_year"] = None
 
             capa=tree.xpath(r"//*[@id='body']/script[2]/text()")[0]
             scores["pac"] =re.search(r"POINT_PAC=(\d+)", capa).group(1)
