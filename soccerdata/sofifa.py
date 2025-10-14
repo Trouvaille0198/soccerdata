@@ -210,6 +210,57 @@ class SoFIFA(BaseRequestsReader):
 
         # return data frame
         return pd.DataFrame(teams).replace({"team": TEAMNAME_REPLACEMENTS}).set_index(["team_id"])
+    
+    def read_coach_id(self, team: Optional[Union[str, list[str]]] = None)->str|None:
+        # build url
+        urlmask = SO_FIFA_API + "/team/{}/?r={}&set=true"
+        filemask = "coach_{}_{}.html"
+
+        # get list of teams
+        df_teams = self.read_teams()
+
+        if team is not None:
+            teams_to_check = add_standardized_team_name(team)
+
+            # select requested teams
+            iterator = df_teams.loc[df_teams.team.isin(teams_to_check), :]
+            if len(iterator) == 0:
+                raise ValueError("No data found for the given teams in the selected seasons.")
+        else:
+            iterator = df_teams
+
+        # collect coach
+        coach_id=None
+        iterator = list(product(self.versions.iterrows(), iterator.iterrows()))
+        for i, ((version_id, version), (team_id, df_team)) in enumerate(iterator):
+            logger.info(
+                "[%s/%s] Retrieving list of coach for %s in %s edition",
+                i + 1,
+                len(iterator),
+                df_team["team"],
+                version["update"],
+            )
+
+            # read html page (team overview)
+            filepath = self.data_dir / filemask.format(team_id, version_id)
+            url = urlmask.format(team_id, version_id)
+            reader = self.get(url, filepath)
+
+            # extract player links
+            tree = html.parse(reader)
+            
+            for node in tree.xpath("/html/body/header/nav/ul/li/a[contains(@href,'/coach/')]"):
+                # 解析coach链接，提取id
+                href = node.attrib.get("href", "")
+                # 匹配类似 "/coach/128160/simone-inzaghi/"
+                import re
+                match = re.match(r"/coach/(\d+)(?:/([^/]+))?/?", href)
+                if match:
+                    coach_id = match.group(1)
+                    break
+
+        # return data frame
+        return coach_id
 
     def read_players(self, team: Optional[Union[str, list[str]]] = None) -> pd.DataFrame:
         """Retrieve all players for the selected leagues.
@@ -372,6 +423,161 @@ class SoFIFA(BaseRequestsReader):
             .sort_index()
         )
 
+    def read_coach(self, team: str) -> pd.DataFrame:
+        """Retrieve coach information for a specific team.
+        
+        Parameters
+        ----------
+        team: str
+            Team name to retrieve coach information for.
+            
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing coach information (name, avatar, age).
+        """
+        # 首先获取教练ID
+        coach_id = self.read_coach_id(team)
+        if not coach_id:
+            logger.warning(f"No coach found for team: {team}")
+            return pd.DataFrame()
+        
+        # build url
+        urlmask = SO_FIFA_API + "/coach/{}/?r={}&set=true"
+        filemask = "coach_{}_{}.html"
+        
+        # 准备数据收集列表
+        coach_info = []
+        
+        # 遍历所有版本
+        iterator = list(self.versions.iterrows())
+        for i, (version_id, version) in enumerate(iterator):
+            logger.info(
+                "[%s/%s] Retrieving coach information for team %s in %s edition",
+                i + 1,
+                len(iterator),
+                team,
+                version["update"],
+            )
+            
+            # read html page (coach overview)
+            filepath = self.data_dir / filemask.format(coach_id, version_id)
+            url = urlmask.format(coach_id, version_id)
+            reader = self.get(url, filepath)
+            
+            # 解析HTML页面
+            tree = html.parse(reader, parser=html.HTMLParser(encoding="utf8"))
+            
+            # 提取教练姓名 - 使用多个备用方案
+            coach_name = None
+            try:
+                # 方案1: 从教练链接中获取姓名
+                name_xpaths = [
+                    "//aside//h5[text()='Coach']/following-sibling::div//a[contains(@href, '/coach/')]/text()",
+                    "//aside//a[contains(@href, '/coach/')]/text()",
+                    "//a[contains(@href, '/coach/') and contains(@title, '')]/text()",
+                    "//a[contains(@href, '/coach/')]/@title"
+                ]
+                
+                for xpath in name_xpaths:
+                    name_nodes = tree.xpath(xpath)
+                    if name_nodes and name_nodes[0].strip():
+                        coach_name = name_nodes[0].strip()
+                        break
+                
+                # 方案2: 从页面标题获取
+                if not coach_name:
+                    title_nodes = tree.xpath("//title/text()")
+                    if title_nodes:
+                        coach_name = title_nodes[0].split("-")[0].strip()
+                
+                # 方案3: 从header中的链接获取
+                if not coach_name:
+                    header_name_nodes = tree.xpath("//header//a[contains(@href, '/coach/')]/text()")
+                    if header_name_nodes:
+                        coach_name = header_name_nodes[0].strip()
+                        
+            except Exception as e:
+                logger.warning(f"Could not extract coach name: {e}")
+                coach_name = "Unknown"
+            
+            # 提取头像URL - 使用多个备用方案
+            avatar_url = None
+            try:
+                # 方案1: 从教练头像中获取URL
+                avatar_xpaths = [
+                    "//aside//h5[text()='Coach']/following-sibling::div//img[contains(@class, 'avatar')]/@data-src",
+                    "//aside//img[contains(@class, 'avatar')]/@data-src",
+                    "//img[contains(@class, 'avatar') and contains(@data-src, 'coach')]/@data-src",
+                    "//aside//h5[text()='Coach']/following-sibling::div//img[contains(@class, 'avatar')]/@src",
+                    "//aside//img[contains(@class, 'avatar')]/@src",
+                    "//img[contains(@class, 'avatar') and contains(@src, 'coach')]/@src"
+                ]
+                
+                for xpath in avatar_xpaths:
+                    avatar_nodes = tree.xpath(xpath)
+                    if avatar_nodes and avatar_nodes[0].strip():
+                        avatar_url = avatar_nodes[0].strip()
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"Could not extract avatar URL: {e}")
+                avatar_url = None
+            
+            # 提取年龄信息 - 使用多个备用方案
+            age = None
+            try:
+                # 方案1: 从教练信息段落中提取年龄
+                age_xpaths = [
+                    "//aside//h5[text()='Coach']/following-sibling::div//p/text()",
+                    "//aside//p/text()",
+                    "//aside//text()[contains(., 'y.o.')]",
+                    "//text()[contains(., 'y.o.')]"
+                ]
+                
+                for xpath in age_xpaths:
+                    age_text_nodes = tree.xpath(xpath)
+                    for info_text in age_text_nodes:
+                        if info_text and info_text.strip():
+                            # 匹配多种年龄模式
+                            age_patterns = [
+                                r'(\d+)\s*y\.o\.',  # "49 y.o."
+                                r'(\d+)\s*years?\s*old',  # "49 years old"
+                                r'(\d+)\s*yo',  # "49 yo"
+                                r'age[:\s]*(\d+)',  # "age: 49"
+                                r'(\d+)\s*岁'  # "49 岁" (中文)
+                            ]
+                            
+                            for pattern in age_patterns:
+                                age_match = re.search(pattern, info_text, re.IGNORECASE)
+                                if age_match:
+                                    age = int(age_match.group(1))
+                                    break
+                            
+                            if age:
+                                break
+                    
+                    if age:
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"Could not extract age: {e}")
+                age = None
+            
+            # 收集教练信息
+            coach_info.append({
+                "coach_id": int(coach_id),
+                "coach_name": coach_name,
+                "avatar_url": avatar_url,
+                "age": age,
+                "team": team,
+                **version.to_dict(),
+            })
+        
+        # 返回DataFrame
+        return pd.DataFrame(coach_info).set_index(["coach_id"])
+    
+    
     def read_player_ratings(
         self,
         team: Optional[Union[str, list[str]]] = None,
