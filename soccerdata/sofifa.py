@@ -140,7 +140,9 @@ class SoFIFA(BaseRequestsReader):
         # extract FIFA releases
         versions = []
         tree = html.parse(reader)
-        for i, node_fifa_edition in enumerate(tree.xpath("//header/section/p/select[1]/option")):
+        for i, node_fifa_edition in enumerate(
+            tree.xpath("//header/section/p/select[1]/option")
+        ):
             fifa_edition = node_fifa_edition.text
             filepath = self.data_dir / f"updates_{fifa_edition}.html"
             url = SO_FIFA_API + node_fifa_edition.get("value")
@@ -209,9 +211,13 @@ class SoFIFA(BaseRequestsReader):
                 )
 
         # return data frame
-        return pd.DataFrame(teams).replace({"team": TEAMNAME_REPLACEMENTS}).set_index(["team_id"])
-    
-    def read_coach_id(self, team: Optional[Union[str, list[str]]] = None)->str|None:
+        return (
+            pd.DataFrame(teams)
+            .replace({"team": TEAMNAME_REPLACEMENTS})
+            .set_index(["team_id"])
+        )
+
+    def read_coach_id(self, team: Optional[Union[str, list[str]]] = None) -> str | None:
         # build url
         urlmask = SO_FIFA_API + "/team/{}/?r={}&set=true"
         filemask = "coach_{}_{}.html"
@@ -225,12 +231,14 @@ class SoFIFA(BaseRequestsReader):
             # select requested teams
             iterator = df_teams.loc[df_teams.team.isin(teams_to_check), :]
             if len(iterator) == 0:
-                raise ValueError("No data found for the given teams in the selected seasons.")
+                raise ValueError(
+                    "No data found for the given teams in the selected seasons."
+                )
         else:
             iterator = df_teams
 
         # collect coach
-        coach_id=None
+        coach_id = None
         iterator = list(product(self.versions.iterrows(), iterator.iterrows()))
         for i, ((version_id, version), (team_id, df_team)) in enumerate(iterator):
             logger.info(
@@ -248,12 +256,15 @@ class SoFIFA(BaseRequestsReader):
 
             # extract player links
             tree = html.parse(reader)
-            
-            for node in tree.xpath("/html/body/header/nav/ul/li/a[contains(@href,'/coach/')]"):
+
+            for node in tree.xpath(
+                "/html/body/header/nav/ul/li/a[contains(@href,'/coach/')]"
+            ):
                 # 解析coach链接，提取id
                 href = node.attrib.get("href", "")
                 # 匹配类似 "/coach/128160/simone-inzaghi/"
                 import re
+
                 match = re.match(r"/coach/(\d+)(?:/([^/]+))?/?", href)
                 if match:
                     coach_id = match.group(1)
@@ -262,7 +273,9 @@ class SoFIFA(BaseRequestsReader):
         # return data frame
         return coach_id
 
-    def read_players(self, team: Optional[Union[str, list[str]]] = None) -> pd.DataFrame:
+    def read_players(
+        self, team: Optional[Union[str, list[str]]] = None
+    ) -> pd.DataFrame:
         """Retrieve all players for the selected leagues.
 
         Parameters
@@ -292,7 +305,9 @@ class SoFIFA(BaseRequestsReader):
             # select requested teams
             iterator = df_teams.loc[df_teams.team.isin(teams_to_check), :]
             if len(iterator) == 0:
-                raise ValueError("No data found for the given teams in the selected seasons.")
+                raise ValueError(
+                    "No data found for the given teams in the selected seasons."
+                )
         else:
             iterator = df_teams
 
@@ -425,12 +440,12 @@ class SoFIFA(BaseRequestsReader):
 
     def read_coach(self, team: str) -> pd.DataFrame:
         """Retrieve coach information for a specific team.
-        
+
         Parameters
         ----------
         team: str
             Team name to retrieve coach information for.
-            
+
         Returns
         -------
         pd.DataFrame
@@ -441,14 +456,14 @@ class SoFIFA(BaseRequestsReader):
         if not coach_id:
             logger.warning(f"No coach found for team: {team}")
             return pd.DataFrame()
-        
+
         # build url
         urlmask = SO_FIFA_API + "/coach/{}/?r={}&set=true"
         filemask = "coach_{}_{}.html"
-        
+
         # 准备数据收集列表
         coach_info = []
-        
+
         # 遍历所有版本
         iterator = list(self.versions.iterrows())
         for i, (version_id, version) in enumerate(iterator):
@@ -459,15 +474,15 @@ class SoFIFA(BaseRequestsReader):
                 team,
                 version["update"],
             )
-            
+
             # read html page (coach overview)
             filepath = self.data_dir / filemask.format(coach_id, version_id)
             url = urlmask.format(coach_id, version_id)
             reader = self.get(url, filepath)
-            
+
             # 解析HTML页面
             tree = html.parse(reader, parser=html.HTMLParser(encoding="utf8"))
-            
+
             # 提取教练姓名 - 使用多个备用方案
             coach_name = None
             try:
@@ -476,31 +491,33 @@ class SoFIFA(BaseRequestsReader):
                     "//aside//h5[text()='Coach']/following-sibling::div//a[contains(@href, '/coach/')]/text()",
                     "//aside//a[contains(@href, '/coach/')]/text()",
                     "//a[contains(@href, '/coach/') and contains(@title, '')]/text()",
-                    "//a[contains(@href, '/coach/')]/@title"
+                    "//a[contains(@href, '/coach/')]/@title",
                 ]
-                
+
                 for xpath in name_xpaths:
                     name_nodes = tree.xpath(xpath)
                     if name_nodes and name_nodes[0].strip():
                         coach_name = name_nodes[0].strip()
                         break
-                
+
                 # 方案2: 从页面标题获取
                 if not coach_name:
                     title_nodes = tree.xpath("//title/text()")
                     if title_nodes:
                         coach_name = title_nodes[0].split("-")[0].strip()
-                
+
                 # 方案3: 从header中的链接获取
                 if not coach_name:
-                    header_name_nodes = tree.xpath("//header//a[contains(@href, '/coach/')]/text()")
+                    header_name_nodes = tree.xpath(
+                        "//header//a[contains(@href, '/coach/')]/text()"
+                    )
                     if header_name_nodes:
                         coach_name = header_name_nodes[0].strip()
-                        
+
             except Exception as e:
                 logger.warning(f"Could not extract coach name: {e}")
                 coach_name = "Unknown"
-            
+
             # 提取头像URL - 使用多个备用方案
             avatar_url = None
             try:
@@ -511,19 +528,19 @@ class SoFIFA(BaseRequestsReader):
                     "//img[contains(@class, 'avatar') and contains(@data-src, 'coach')]/@data-src",
                     "//aside//h5[text()='Coach']/following-sibling::div//img[contains(@class, 'avatar')]/@src",
                     "//aside//img[contains(@class, 'avatar')]/@src",
-                    "//img[contains(@class, 'avatar') and contains(@src, 'coach')]/@src"
+                    "//img[contains(@class, 'avatar') and contains(@src, 'coach')]/@src",
                 ]
-                
+
                 for xpath in avatar_xpaths:
                     avatar_nodes = tree.xpath(xpath)
                     if avatar_nodes and avatar_nodes[0].strip():
                         avatar_url = avatar_nodes[0].strip()
                         break
-                        
+
             except Exception as e:
                 logger.warning(f"Could not extract avatar URL: {e}")
                 avatar_url = None
-            
+
             # 提取年龄信息 - 使用多个备用方案
             age = None
             try:
@@ -532,52 +549,53 @@ class SoFIFA(BaseRequestsReader):
                     "//aside//h5[text()='Coach']/following-sibling::div//p/text()",
                     "//aside//p/text()",
                     "//aside//text()[contains(., 'y.o.')]",
-                    "//text()[contains(., 'y.o.')]"
+                    "//text()[contains(., 'y.o.')]",
                 ]
-                
+
                 for xpath in age_xpaths:
                     age_text_nodes = tree.xpath(xpath)
                     for info_text in age_text_nodes:
                         if info_text and info_text.strip():
                             # 匹配多种年龄模式
                             age_patterns = [
-                                r'(\d+)\s*y\.o\.',  # "49 y.o."
-                                r'(\d+)\s*years?\s*old',  # "49 years old"
-                                r'(\d+)\s*yo',  # "49 yo"
-                                r'age[:\s]*(\d+)',  # "age: 49"
-                                r'(\d+)\s*岁'  # "49 岁" (中文)
+                                r"(\d+)\s*y\.o\.",  # "49 y.o."
+                                r"(\d+)\s*years?\s*old",  # "49 years old"
+                                r"(\d+)\s*yo",  # "49 yo"
+                                r"age[:\s]*(\d+)",  # "age: 49"
+                                r"(\d+)\s*岁",  # "49 岁" (中文)
                             ]
-                            
+
                             for pattern in age_patterns:
                                 age_match = re.search(pattern, info_text, re.IGNORECASE)
                                 if age_match:
                                     age = int(age_match.group(1))
                                     break
-                            
+
                             if age:
                                 break
-                    
+
                     if age:
                         break
-                        
+
             except Exception as e:
                 logger.warning(f"Could not extract age: {e}")
                 age = None
-            
+
             # 收集教练信息
-            coach_info.append({
-                "coach_id": int(coach_id),
-                "coach_name": coach_name,
-                "avatar_url": avatar_url,
-                "age": age,
-                "team": team,
-                **version.to_dict(),
-            })
-        
+            coach_info.append(
+                {
+                    "coach_id": int(coach_id),
+                    "coach_name": coach_name,
+                    "avatar_url": avatar_url,
+                    "age": age,
+                    "team": team,
+                    **version.to_dict(),
+                }
+            )
+
         # 返回DataFrame
         return pd.DataFrame(coach_info).set_index(["coach_id"])
-    
-    
+
     def read_player_ratings(
         self,
         team: Optional[Union[str, list[str]]] = None,
@@ -674,42 +692,53 @@ class SoFIFA(BaseRequestsReader):
             # Extract what is before <br>
             before_br = node_player_name.xpath("string(./text()[1])").strip()
             # Extract what is after <br>
-            after_br = node_player_name.xpath("string(./br/following-sibling::text()[1])").strip()
+            after_br = node_player_name.xpath(
+                "string(./br/following-sibling::text()[1])"
+            ).strip()
             scores = {
                 "player": before_br if before_br else after_br,
                 **version.to_dict(),
             }
 
             # region basic info
-            simple_name=tree.xpath("/html/body/header/section/h1/text()")[0]
-            scores["simple_name"]=simple_name
+            simple_name = tree.xpath("/html/body/header/section/h1/text()")[0]
+            scores["simple_name"] = simple_name
 
-            basic_info_p=tree.xpath("//div[contains(@class, 'profile')]/p/text()")
-            basic_info=next((b for b in basic_info_p if b.strip()), None)
+            basic_info_p = tree.xpath("//div[contains(@class, 'profile')]/p/text()")
+            basic_info = next((b for b in basic_info_p if b.strip()), None)
             if not basic_info:
                 raise ValueError(f"Basic information not found for player {player}")
             basic_info_match = re.match(
-    r"^(\d+)y\.o\..*?\((\w+\s\d{1,2},\s\d{4})[^)]*\)\s(\d+)cm.*\s(\d+)kg.*?$",
-    basic_info,
-)
+                r"^(\d+)y\.o\..*?\((\w+\s\d{1,2},\s\d{4})[^)]*\)\s(\d+)cm.*\s(\d+)kg.*?$",
+                basic_info,
+            )
             if not basic_info_match:
-                raise ValueError(f"Basic information '{basic_info}' not recognized for player {player}")
+                raise ValueError(
+                    f"Basic information '{basic_info}' not recognized for player {player}"
+                )
 
             scores["age"] = int(basic_info_match.group(1))
-            scores["birthdate"] = datetime.strptime(basic_info_match.group(2), "%b %d, %Y").strftime("%m-%d")
+            scores["birthdate"] = datetime.strptime(
+                basic_info_match.group(2), "%b %d, %Y"
+            ).strftime("%m-%d")
             scores["height"] = int(basic_info_match.group(3))
             scores["weight"] = int(basic_info_match.group(4))
 
-            poses=tree.xpath("//div[contains(@class, 'profile')]/p/span/text()")
-            scores["pos"]=poses[0]
-            scores["poses"]=poses[:]
-            scores["avatar"] = tree.xpath("//div[contains(@class, 'profile')]/img/@data-src")[0]
-            name_line=tree.xpath("//*[@id='head']/title/text()")[0]
-            scores["name"]=name_line.split("-")[0].strip()
-            contract_end_year_text=tree.xpath('//p[contains(., "Contract valid until")]/text()[normalize-space()]')
+            poses = tree.xpath("//div[contains(@class, 'profile')]/p/a/span/text()")
+
+            scores["pos"] = poses[0]
+            scores["poses"] = poses[:]
+            scores["avatar"] = tree.xpath(
+                "//div[contains(@class, 'profile')]/img/@data-src"
+            )[0]
+            name_line = tree.xpath("//*[@id='head']/title/text()")[0]
+            scores["name"] = name_line.split("-")[0].strip()
+            contract_end_year_text = tree.xpath(
+                '//p[contains(., "Contract valid until")]/text()[normalize-space()]'
+            )
             if contract_end_year_text:
                 # 提取数字部分
-                year_match = re.search(r'\d{4}', contract_end_year_text[0])
+                year_match = re.search(r"\d{4}", contract_end_year_text[0])
                 if year_match:
                     scores["contract_end_year"] = int(year_match.group())
                 else:
@@ -717,8 +746,8 @@ class SoFIFA(BaseRequestsReader):
             else:
                 scores["contract_end_year"] = None
 
-            capa=tree.xpath(r"//*[@id='body']/script[2]/text()")[0]
-            scores["pac"] =re.search(r"POINT_PAC=(\d+)", capa).group(1)
+            capa = tree.xpath(r"//*[@id='body']/script[2]/text()")[0]
+            scores["pac"] = re.search(r"POINT_PAC=(\d+)", capa).group(1)
             scores["sho"] = re.search(r"POINT_SHO=(\d+)", capa).group(1)
             scores["pas"] = re.search(r"POINT_PAS=(\d+)", capa).group(1)
             scores["dri"] = re.search(r"POINT_DRI=(\d+)", capa).group(1)
@@ -746,14 +775,20 @@ class SoFIFA(BaseRequestsReader):
             ratings.append(scores)
             # endregion
         # return data frame
-        return pd.DataFrame(ratings).pipe(standardize_colnames).set_index(["player"]).sort_index()
+        return (
+            pd.DataFrame(ratings)
+            .pipe(standardize_colnames)
+            .set_index(["player"])
+            .sort_index()
+        )
+
 
 def remove_currency(s):
-    digital_part = re.sub(r'[^\d\.]', '', s)
+    digital_part = re.sub(r"[^\d\.]", "", s)
     val = float(digital_part)
-    if 'M' in s:
+    if "M" in s:
         return str(int(val * 1000000))
-    elif 'K' in s:
+    elif "K" in s:
         return str(int(val * 1000))
     else:
         return str(int(val))
